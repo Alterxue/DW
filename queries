@@ -1,0 +1,97 @@
+--q1 
+db.velov2026.find().count()
+
+--q2
+db.velov2026.find({ 
+    "commune": "Villeurbanne" 
+});
+
+--q3
+db.velov2026.find({
+    "status":"OPEN",
+    "total_stands.availabilities.mechanicalBikes":{$gt:1},
+});
+
+--q4
+db.velov2026.find(
+    {
+        "banking": true,
+    },
+    {
+        "name" : 1,
+        "address" : 1,
+        _id : 0,
+    }
+);
+
+--q5
+db.velov2026.find()
+.sort({ "bike_stands": -1 })
+.limit(5);
+
+db.velov2026.aggregate({
+    $sort:{"bike_stands":-1}
+},
+    {
+        $limit:5
+    });
+
+--q6
+db.velov2026.find(
+    {
+        "status":"OPEN",
+        "available_bikes": 0
+    }
+)
+.sort({ "pole": 1 });
+
+--q7
+db.velov2026.find(
+    {
+        "commune": "Lyon 5e Arrondissement",
+    },
+    {
+        "name" : 1,
+        "available_bikes" : 1,
+        // "commune":1,
+        _id : 0,
+    }
+);
+
+--q8
+db.velov2026.aggregate(
+    {   
+        $group:{_id:"$commune",velos_disponibles:{$sum:"$available_bikes"},capacite_moyenne: { $avg: "$available_bikes" }}
+    }
+);
+
+--q9
+db.velov2026.find(
+    {
+        $expr:{$gt:["$total_stands.availabilities.electricalBikes",{$multiply:["$available_bikes",0.5]}]}
+    },
+);
+
+--q10
+db.velov2026.aggregate(
+    {   
+        $project: {
+            _id:"$name",
+            days_elapsed :{
+                $divide:[{
+                    $subtract:[new Date(),{$toDate: "$last_update"}]},
+                    1000*60*60*24]}
+        }
+    }
+);
+
+--q11
+db.velov2026.createIndex( { "geometry.coordinates": "2dsphere" } )
+db.velov2026.find({
+    "geometry.coordinates":{
+        $near: {
+                $geometry: { type: "Point",  coordinates: [ 4.815, 45.743] },
+                $minDistance: 0,
+                $maxDistance: 500
+          }}
+})
