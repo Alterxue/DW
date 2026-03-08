@@ -1,0 +1,253 @@
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>TP 3IF DW 2026</title>
+    
+    </head>
+    <body>
+        <!-- initialize the table -->
+        <table id="hoverTable" border="1" style="border-collapse:collapse; margin-bottom:8px; table-layout:fixed; width:450px;">
+            <colgroup>
+                <col style="width:220px;">
+                <col style="width:120px;">
+                <col style="width:110px;">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>District</th>
+                    <th>Nb stations</th>
+                    <th>Avg available bikes</th>
+                </tr>
+            </thead>
+            <tbody id="hoverBody">
+                <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+            </tbody>
+        </table>
+
+        <div style="display:flex; gap:30px; align-items:flex-start;">
+            <div>
+                <div id="svgContainer" style="cursor:pointer;"></div>
+                <select id="communeSelect" style="margin-top:8px; display:block;">
+                    <option value="">choose your city</option>
+                </select>
+            </div>
+            <div>
+                <h3 id="stationsTitle" style="display:none; margin:0 0 8px 0;"></h3>
+                <div style="margin-bottom:8px; display:none;" id="statusFilterDiv">
+                    Filter by status:
+                    <select id="statusSelect" onchange="onStatusChange()">
+                        <option value="ALL">ALL</option>
+                        <option value="OPEN">OPEN</option>
+                        <option value="CLOSED">CLOSED</option>
+                    </select>
+                </div>
+                <table id="stationsTable" border="1" style="display:none; border-collapse:collapse; table-layout:fixed; width:900px;">
+                    <colgroup>
+                        <col style="width:380px;">
+                        <col style="width:220px;">
+                        <col style="width:150px;">
+                        <col style="width:150px;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Nom de la station</th>
+                            <th>Commune</th>
+                            <th>Vélos disponibles</th>
+                            <th>Toilettes nearby</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stationsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+    </html>
+
+
+    <script> //focus on the interaction with the map
+        // get the svgid to name of commune
+        const svgIdToCommune = {
+            "Lyon 1": "Lyon 1er Arrondissement",
+            "Lyon 2": "Lyon 2e Arrondissement",
+            "Lyon 3": "Lyon 3e Arrondissement",
+            "Lyon 4": "Lyon 4e Arrondissement",
+            "Lyon 5": "Lyon 5e Arrondissement",
+            "Lyon 6": "Lyon 6e Arrondissement",
+            "Lyon 7": "Lyon 7e Arrondissement",
+            "Lyon 8": "Lyon 8e Arrondissement",
+            "Lyon 9": "Lyon 9e Arrondissement",
+        };
+
+        // cache: commune -> {count, avg}
+        const districtStats = {};
+
+        async function fetchSvgContent(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                return await response.text();
+            } catch (error) {
+                console.error("Error fetching the SVG:", error);
+                return null;
+            }
+        }
+
+        // preload stats for all lyon communes we dont need to handle the query everytime we click
+        async function preloadStats() {
+            const response = await fetch('/api/communes/stats');
+            const statsArr = await response.json();
+            statsArr.forEach(s => {
+                const svgId = Object.keys(svgIdToCommune).find(k => svgIdToCommune[k] === s.commune);
+                if (svgId) {
+                    districtStats[svgId] = { commune: s.commune, count: s.nbStations, avg: s.avgBikes };
+                }
+            });
+        }
+
+        let selectedPath = null;
+
+        async function initializeMap() {
+            const svgData = await fetchSvgContent('lyon_districts.svg');
+            if (!svgData) return;
+            const container = document.getElementById("svgContainer");
+            container.innerHTML = svgData;
+
+            await preloadStats();
+
+            Object.keys(svgIdToCommune).forEach(id => {
+                const path = container.querySelector(`[id="${id}"]`);
+                if (!path) return;
+                const origFill = path.style.fill || path.getAttribute('fill') || '';
+
+                path.style.cursor = 'pointer';
+
+                // mouseover: highlight + show stats table
+                path.addEventListener('mouseover', function() {
+                    if (this !== selectedPath) this.style.fill = '#f39c12';
+                    const stats = districtStats[id];
+                    if (stats) {
+                        document.getElementById('hoverBody').innerHTML =
+                            `<tr><td>${stats.commune}</td><td>${stats.count}</td><td>${stats.avg}</td></tr>`;
+                    }
+                });
+
+                // mouseleave: restore color + clear stats table
+                path.addEventListener('mouseleave', function() {
+                    if (this !== selectedPath) this.style.fill = origFill;
+                    document.getElementById('hoverBody').innerHTML =
+                        '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
+                });
+
+                // click: select district + load stations
+                path.addEventListener('click', async function() {
+                    if (selectedPath && selectedPath !== this) {
+                        selectedPath.style.fill = selectedPath.getAttribute('fill') || origFill;
+                    }
+                    this.style.fill = '#e74c3c';
+                    selectedPath = this;
+                    const commune = svgIdToCommune[id];
+                    document.getElementById('communeSelect').value = commune; //get the communeselect to this value
+                    await loadStations(commune);
+                });
+            });
+        }
+
+        async function loadStations(commune) {
+            const status = document.getElementById('statusSelect').value;
+            let url = `/api/stations?commune=${encodeURIComponent(commune)}`;
+            if (status && status !== 'ALL') {
+                url += `&status=${status}`;
+            }
+            const response = await fetch(url);
+            const stations = await response.json();
+            renderTable(stations, commune);
+        }
+    </script>
+
+    <script> // focus on the dropdown list
+        async function loadCommunes() {
+            const response = await fetch('/api/communes');
+            const communes = await response.json();
+            const select = document.getElementById('communeSelect');
+            communes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.innerHTML = c;
+                select.appendChild(opt);
+            });
+        }
+
+        // see which one the client has chosen
+        document.getElementById('communeSelect').onchange = async function() {
+            const selected = this.value;
+            if (!selected) return;
+            // reset SVG highlight
+            if (selectedPath) {
+                selectedPath.style.fill = selectedPath.getAttribute('fill') || '';
+                selectedPath = null;
+            }
+            // highlight matching district on SVG
+            const svgId = Object.keys(svgIdToCommune).find(k => svgIdToCommune[k] === selected);
+            if (svgId) {
+                const path = document.getElementById('svgContainer').querySelector(`[id="${svgId}"]`);
+                if (path) {
+                    path.style.fill = '#e74c3c';
+                    selectedPath = path;
+                }
+            }
+            await loadStations(selected);
+        };
+
+        function renderTable(stations, commune) {
+            const tbody = document.getElementById('stationsBody');
+            const table = document.getElementById('stationsTable');
+            const title = document.getElementById('stationsTitle');
+            const filterDiv = document.getElementById('statusFilterDiv');
+            tbody.innerHTML = '';
+            if (!stations || stations.length === 0) {
+                table.style.display = 'none';
+                title.style.display = 'none';
+                return;
+            }
+            if (commune) {
+                title.textContent = `Stations — ${commune}`;
+                title.style.display = 'block';
+            }
+            filterDiv.style.display = 'block';
+            stations.forEach(s => {
+                const tr = document.createElement('tr');
+                const toiletCell = s.toilets_count > 0 ? `${s.toilets_count}` : '0';
+                tr.innerHTML = `<td>${s.name}</td><td>${s.commune}</td><td>${s.available_bikes}</td><td style="text-align:center">${toiletCell}</td>`;
+                tbody.appendChild(tr);
+            });
+            table.style.display = 'table';
+        }
+
+        // when status filter changes, reload stations for current commune
+        async function onStatusChange() {
+            const commune = document.getElementById('communeSelect').value;
+            if (commune) await loadStations(commune);
+        }
+
+        // auto-load map and communes on page load
+        initializeMap();
+        loadCommunes();
+
+        async function searchStationsWithStatus() {
+            const selectedStatus = document.getElementById("statusSelect").value;
+            const url = `/api/status_filtered_stations?status=${selectedStatus}`;
+            try {
+                const res = await fetch(url);
+                const stations = await res.json();
+                const list = document.getElementById("stationNameList");
+                list.innerHTML = "";
+                stations.forEach(s => {
+                    const li = document.createElement("li");
+                    li.textContent = s.name;
+                    list.appendChild(li);
+                });
+            } catch (e) {
+                console.error("Station load error", e);
+            }
+        }
+    </script>
